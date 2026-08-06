@@ -1,0 +1,25 @@
+services:
+  telegram-client:
+    build: .
+    container_name: telegram-ce
+
+    stdin_open: true
+    tty: true
+
+    volumes:
+      - ./core/src:/app/src
+      - ./core/data:/app/data
+
+    env_file:
+      - .env
+
+    environment:
+      - PYTHONIOENCODING=utf-8
+
+    restart: unless-stopped
+
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
