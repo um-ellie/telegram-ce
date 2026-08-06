@@ -48,7 +48,7 @@
 
 <div align="center">
 
-<img src="https://via.placeholder.com/800x450.png?text=Telegram+CE+Terminal+UI+Screenshot" alt="نمای محیط برنامه" width="700"/>
+<img src="https://github.com/user-attachments/assets/f20e4cfc-7aec-4baf-8cdc-32ad9503fff6" alt="نمای محیط برنامه" width="700"/>
 
 
 </div>
