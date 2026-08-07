@@ -125,13 +125,13 @@ TELEGRAM_API_HASH=your_api_hash_here
 
 اول این دستور رو بزن برای ساخت docker compose :
 ```bash
-docker compose build .
+docker compose build
 ```
 
 و بعد با این دستور می تونی اجراش کنی:
 ```bash
 
-docker compose run --rm telegram-ce
+docker compose run --rm telegram-client
 
 ```
 
@@ -250,12 +250,12 @@ To fire up the application, simply run:
 
   maybe you need to build docker compose for first time:
   ```bash
-  docker compose build .
+  docker compose build
   ```
 
 ```bash
 
-docker compose run --rm telegram-ce
+docker compose run --rm telegram-client
 
 ```
 
