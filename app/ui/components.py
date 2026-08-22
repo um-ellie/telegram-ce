@@ -7,7 +7,10 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from .theme import ACCENT, ACCENT_2, BOX, BOX_DOUBLE, BOX_HEAVY, DANGER, DIM, SUCCESS, TYPE_STYLES, WARN, make_console
+from .theme import (
+    ACCENT, ACCENT_2, BOX, BOX_DOUBLE, BOX_HEAVY, DANGER, DIM,
+    SUCCESS, TYPE_STYLES, WARN, make_console,
+)
 
 from ..telegram.service import media_icon
 

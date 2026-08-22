@@ -1,5 +1,6 @@
 """High-level Telegram operations exposed to the UI layer."""
 
+from collections import Counter
 from datetime import datetime, timezone
 
 from telethon import events, functions
@@ -79,20 +80,23 @@ def _sender_display(sender) -> tuple[str, str]:
     return "Unknown", ""
 
 
-def _fmt_date(date) -> str:
-    if not date:
-        return ""
+def _localize(date) -> datetime | None:
+    """Assume naive timestamps are UTC, then convert to the local timezone."""
+    if date is None:
+        return None
     if date.tzinfo is None:
         date = date.replace(tzinfo=timezone.utc)
-    return date.astimezone().strftime("%Y-%m-%d %H:%M")
+    return date.astimezone()
+
+
+def _fmt_date(date) -> str:
+    d = _localize(date)
+    return d.strftime("%Y-%m-%d %H:%M") if d else ""
 
 
 def _fmt_time(date) -> str:
-    if not date:
-        return ""
-    if date.tzinfo is None:
-        date = date.replace(tzinfo=timezone.utc)
-    return date.astimezone().strftime("%H:%M")
+    d = _localize(date)
+    return d.strftime("%H:%M") if d else ""
 
 
 class TelegramService:
@@ -116,21 +120,15 @@ class TelegramService:
     async def stats(self) -> dict:
         """Aggregate account statistics across all dialogs."""
         dialogs = await self.client.get_dialogs(limit=None)
-        counts = {"Channel": 0, "Group": 0, "User": 0, "Bot": 0}
-        unread = 0
-        pinned = 0
-        for d in dialogs:
-            counts[_entity_type(d.entity)] += 1
-            unread += d.unread_count
-            pinned += 1 if d.pinned else 0
+        counts = Counter(_entity_type(d.entity) for d in dialogs)
         return {
             "total": len(dialogs),
             "channels": counts["Channel"],
             "groups": counts["Group"],
             "users": counts["User"],
             "bots": counts["Bot"],
-            "unread": unread,
-            "pinned": pinned,
+            "unread": sum(d.unread_count for d in dialogs),
+            "pinned": sum(1 for d in dialogs if d.pinned),
         }
 
     # ── dialogs ────────────────────────────────────────────────────────────
@@ -227,26 +225,34 @@ class TelegramService:
     # ── live feed ──────────────────────────────────────────────────────────
 
     def register_message_handler(self, callback):
+        """Forward every incoming message to `callback` as a plain dict.
+
+        The handler never raises: a broken message or a rendering hiccup must
+        not disturb the running interactive session.
+        """
         @self.client.on(events.NewMessage)
         async def handler(event):
-            sender = await event.get_sender()
-            sender_name, username = _sender_display(sender)
+            try:
+                sender = await event.get_sender()
+                sender_name, username = _sender_display(sender)
 
-            chat = await event.get_chat()
-            chat_title = (
-                getattr(chat, "title", None)
-                or getattr(chat, "first_name", None)
-                or "Private Chat"
-            )
+                chat = await event.get_chat()
+                chat_title = (
+                    getattr(chat, "title", None)
+                    or getattr(chat, "first_name", None)
+                    or "Private Chat"
+                )
 
-            await callback({
-                "id": event.id,
-                "sender": sender_name,
-                "username": username,
-                "text": event.text or "",
-                "chat_title": chat_title,
-                "chat_id": event.chat_id,
-                "is_channel": isinstance(chat, Channel) and chat.broadcast,
-                "media_type": detect_media_type(event.message.media),
-                "time": datetime.now().strftime("%H:%M"),
-            })
+                await callback({
+                    "id": event.id,
+                    "sender": sender_name,
+                    "username": username,
+                    "text": event.text or "",
+                    "chat_title": chat_title,
+                    "chat_id": event.chat_id,
+                    "is_channel": isinstance(chat, Channel) and chat.broadcast,
+                    "media_type": detect_media_type(event.message.media),
+                    "time": datetime.now().strftime("%H:%M"),
+                })
+            except Exception:
+                pass  # better to drop one live message than to break the session

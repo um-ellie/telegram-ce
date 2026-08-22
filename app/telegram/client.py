@@ -39,12 +39,15 @@ class LoginAborted(Exception):
     """User cancelled the interactive login."""
 
 
+_PHONE_STRIP = str.maketrans("", "", " -()")
+
+
 def normalize_phone(raw: str) -> str | None:
     """Validate a phone number and return it in international `+<digits>` form.
 
     Returns None (with a printed hint) when the number cannot be valid.
     """
-    cleaned = raw.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    cleaned = raw.translate(_PHONE_STRIP)
     if cleaned.startswith("00"):
         cleaned = "+" + cleaned[2:]
     digits = cleaned.lstrip("+")
@@ -64,7 +67,8 @@ def normalize_phone(raw: str) -> str | None:
 
 
 def _describe_code_delivery(sent) -> str:
-    return CODE_DELIVERY_LABELS.get(type(sent.type).__name__, type(sent.type).__name__)
+    name = type(sent.type).__name__
+    return CODE_DELIVERY_LABELS.get(name, name)
 
 
 def _fmt_wait(seconds: int) -> str:
@@ -204,10 +208,7 @@ class TelegramConnection:
                 await self._ask_2fa_password()
                 break
             except (PhoneCodeInvalidError, PhoneCodeExpiredError, PhoneCodeEmptyError) as e:
-                reason = {
-                    PhoneCodeExpiredError: "has expired",
-                    PhoneCodeEmptyError: "was empty",
-                }.get(type(e), "was not accepted")
+                reason = "has expired" if isinstance(e, PhoneCodeExpiredError) else "was not accepted"
                 console.print(
                     f"[bright_yellow]⚠[/] That code {reason}. Make sure you use the "
                     "[bold]newest[/bold] code — Telegram shows it inside the app under "

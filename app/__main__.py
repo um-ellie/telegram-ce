@@ -2,11 +2,10 @@
 
 import asyncio
 
-from .ui.theme import make_console
-
+from .app import App
 from .config import ConfigError, load_config
 from .telegram import LoginAborted, TelegramConnection, TelegramService
-from .app import App
+from .ui.theme import make_console
 
 console = make_console()
 
@@ -20,21 +19,21 @@ async def main() -> None:
 
     connection = TelegramConnection(config.api_id, config.api_hash, config.session_path)
     try:
-        await connection.start()
-    except LoginAborted as e:
-        console.print(f"[bold yellow]Login cancelled:[/bold yellow] {e}")
-        await connection.stop()
-        return
-    except Exception as e:
-        console.print(f"[bold red]Login failed:[/bold red] {e}")
-        await connection.stop()
-        return
+        try:
+            await connection.start()
+        except LoginAborted as e:
+            console.print(f"[bold yellow]Login cancelled:[/bold yellow] {e}")
+            return
+        except Exception as e:
+            console.print(f"[bold red]Login failed:[/bold red] {e}")
+            return
 
-    service = TelegramService(connection)
-    app = App(service, live_feed=config.live_feed)
-    service.register_message_handler(app.on_live_message)
-
-    try:
+        service = TelegramService(connection)
+        app = App(service, live_feed=config.live_feed)
+        if config.live_feed:
+            # skip the NewMessage handler entirely when the feed is off —
+            # it would otherwise fetch sender/chat for every incoming message
+            service.register_message_handler(app.on_live_message)
         await app.run()
     finally:
         await connection.stop()

@@ -1,6 +1,8 @@
 """The interactive application: menu hub, command loop, autocompletion."""
 
 import difflib
+from collections.abc import Awaitable
+from typing import TypeVar
 
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.formatted_text import HTML
@@ -21,6 +23,8 @@ from .ui.theme import ACCENT, ACCENT_2, BOX, DIM, make_console
 
 console = make_console()
 
+T = TypeVar("T")
+
 # prompt_toolkit formatted text (its own HTML dialect, not rich markup)
 PROMPT = HTML(
     '🔵️ <ansicyan><b>tg</b></ansicyan><ansibrightmagenta>·</ansibrightmagenta>'
@@ -40,6 +44,11 @@ HUB_ITEMS = [
 ]
 
 
+def _usage(cmd: str) -> str:
+    """Usage line derived from the command registry (single source of truth)."""
+    return f"Usage: {cmd} {COMMANDS[cmd]['args']}"
+
+
 class CommandCompleter(Completer):
     """Completes command names, and @usernames from cached dialogs."""
 
@@ -50,10 +59,11 @@ class CommandCompleter(Completer):
         text = document.text_before_cursor
         parts = text.split(" ")
         if len(parts) <= 1:
+            prefix = parts[0]
             for name, meta in COMMANDS.items():
-                if name.startswith(parts[0]):
+                if name.startswith(prefix):
                     yield Completion(
-                        name, start_position=-len(parts[0]),
+                        name, start_position=-len(prefix),
                         display_meta=f"{meta['args']}  —  {meta['desc']}",
                     )
             return
@@ -61,9 +71,10 @@ class CommandCompleter(Completer):
             frag = parts[-1]
             if not frag:
                 return
+            needle = frag.casefold()
             for d in self.app.cached_dialogs[:60]:
                 cand = f"@{d['username']}" if d["username"] else d["title"]
-                if cand.lower().startswith(frag.lower()):
+                if cand.casefold().startswith(needle):
                     yield Completion(
                         cand + " ", start_position=-len(frag),
                         display=d["title"], display_meta=d["type"],
@@ -81,12 +92,28 @@ class App:
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
-    def _resolve_target(self, token: str) -> str | int:
+    async def _run(self, label: str, op: Awaitable[T], err: str) -> tuple[bool, T | None]:
+        """Await `op` under a busy spinner; on failure print `err: <cause>`.
+
+        Returns (True, result) on success and (False, None) after reporting
+        the error, so every caller can bail out with a single check.
+        """
+        with busy(label):
+            try:
+                return True, await op
+            except Exception as e:
+                error(f"{err}: {e}")
+                return False, None
+
+    def _resolve_target(self, token: str | int) -> str | int:
         """Resolve #index (from the cached dialog list) to an entity handle.
 
-        Numeric ids (including marked ones like -100…) are returned as int —
-        Telethon would otherwise treat a digit string as a username and fail.
+        Ints pass through untouched (they are already entity ids); numeric
+        strings become ints — Telethon would otherwise treat a digit string
+        as a username and fail.
         """
+        if isinstance(token, int):
+            return token
         token = token.lstrip("#@")
         if token.isdigit() and self.cached_dialogs:
             idx = int(token) - 1
@@ -103,107 +130,115 @@ class App:
 
     async def _ask_target(self, action: str) -> str | int | None:
         """Pick a chat via the interactive menu (falls back to typing)."""
-        dialogs = await self._ensure_dialogs()
+        dialogs = (await self._ensure_dialogs())[:30]
         menu = InteractiveMenu(
             f"Select a chat to {action}",
-            [(f"{d['type']:<7} {d['title']}", f"@{d['username']}" if d["username"] else f"id {d['id']}")
-             for d in dialogs[:30]],
+            [(f"{d['type']:<7} {d['title']}",
+              f"@{d['username']}" if d["username"] else f"id {d['id']}")
+             for d in dialogs],
         )
         idx = menu.select()
         if idx is None:
             return None
-        d = dialogs[:30][idx]
+        d = dialogs[idx]
         return f"@{d['username']}" if d["username"] else d["id"]
 
     # ── actions ─────────────────────────────────────────────────────────────
 
     async def show_dialogs(self) -> None:
-        with busy("Fetching channels and chats…"):
-            try:
-                self.cached_dialogs = await self.service.get_dialogs(limit=50)
-            except Exception as e:
-                error(f"Could not fetch chat list: {e}")
-                return
-        render_dialogs(self.cached_dialogs)
+        success, dialogs = await self._run(
+            "Fetching channels and chats…",
+            self.service.get_dialogs(limit=50),
+            "Could not fetch chat list",
+        )
+        if not success:
+            return
+        self.cached_dialogs = dialogs
+        render_dialogs(dialogs)
 
     async def view_messages(self, target: str | int, limit: int = 15) -> None:
-        target = self._resolve_target(str(target))
-        with busy(f"Fetching messages from {escape(str(target))}…"):
-            try:
-                messages = await self.service.get_messages(target, limit=limit)
-            except Exception as e:
-                error(f"Could not fetch messages: {e}")
-                return
+        target = self._resolve_target(target)
+        success, messages = await self._run(
+            f"Fetching messages from {escape(str(target))}…",
+            self.service.get_messages(target, limit=limit),
+            "Could not fetch messages",
+        )
+        if not success:
+            return
         render_messages(target, messages)
 
     async def entity_info(self, target: str | int) -> None:
-        target = self._resolve_target(str(target))
-        with busy(f"Fetching info for {escape(str(target))}…"):
-            try:
-                info = await self.service.entity_info(target)
-            except Exception as e:
-                error(f"Could not fetch info: {e}")
-                return
+        target = self._resolve_target(target)
+        success, info = await self._run(
+            f"Fetching info for {escape(str(target))}…",
+            self.service.entity_info(target),
+            "Could not fetch info",
+        )
+        if not success:
+            return
         render_entity_info(info)
 
     async def send_message(self, target: str | int, text: str) -> None:
-        target = self._resolve_target(str(target))
-        with busy(f"Sending to {escape(str(target))}…"):
-            try:
-                await self.service.send_message(target, text)
-            except Exception as e:
-                error(f"Failed to send: {e}")
-                return
-        ok(f"Message sent to [bold]{escape(str(target))}[/bold]")
+        target = self._resolve_target(target)
+        success, _ = await self._run(
+            f"Sending to {escape(str(target))}…",
+            self.service.send_message(target, text),
+            "Failed to send",
+        )
+        if success:
+            ok(f"Message sent to [bold]{escape(str(target))}[/bold]")
 
     async def join(self, target: str) -> None:
-        with busy(f"Joining {escape(target)}…"):
-            try:
-                await self.service.join_channel(target)
-            except Exception as e:
-                error(f"Failed to join: {e}")
-                return
-        self.cached_dialogs = []
-        ok(f"Joined [bold]{escape(target)}[/bold]")
+        success, _ = await self._run(
+            f"Joining {escape(target)}…",
+            self.service.join_channel(target),
+            "Failed to join",
+        )
+        if success:
+            self.cached_dialogs = []
+            ok(f"Joined [bold]{escape(target)}[/bold]")
 
-    async def leave(self, target: str) -> None:
-        with busy(f"Leaving {escape(target)}…"):
-            try:
-                await self.service.leave_channel(target)
-            except Exception as e:
-                error(f"Failed to leave: {e}")
-                return
-        self.cached_dialogs = []
-        warn(f"Left [bold]{escape(target)}[/bold]")
+    async def leave(self, target: str | int) -> None:
+        success, _ = await self._run(
+            f"Leaving {escape(str(target))}…",
+            self.service.leave_channel(target),
+            "Failed to leave",
+        )
+        if success:
+            self.cached_dialogs = []
+            warn(f"Left [bold]{escape(str(target))}[/bold]")
 
     async def mark_read(self, target: str | int) -> None:
-        target = self._resolve_target(str(target))
-        try:
-            await self.service.mark_read(target)
+        target = self._resolve_target(target)
+        success, _ = await self._run(
+            f"Marking {escape(str(target))} as read…",
+            self.service.mark_read(target),
+            "Failed to mark as read",
+        )
+        if success:
             ok(f"Marked [bold]{escape(str(target))}[/bold] as read")
-        except Exception as e:
-            error(f"Failed: {e}")
 
     async def search(self, query: str) -> None:
-        with busy(f"Searching for '{escape(query)}'…"):
-            try:
-                results = await self.service.search_dialogs(query)
-            except Exception as e:
-                error(f"Search failed: {e}")
-                return
+        success, results = await self._run(
+            f"Searching for '{escape(query)}'…",
+            self.service.search_dialogs(query),
+            "Search failed",
+        )
+        if not success:
+            return
         if not results:
             warn(f"No chats matching '{escape(query)}'")
             return
         render_dialogs(results)
 
     async def stats(self) -> None:
-        with busy("Crunching your account numbers…"):
-            try:
-                stats = await self.service.stats()
-            except Exception as e:
-                error(f"Could not compute stats: {e}")
-                return
-        render_stats(stats)
+        success, stats = await self._run(
+            "Crunching your account numbers…",
+            self.service.stats(),
+            "Could not compute stats",
+        )
+        if success:
+            render_stats(stats)
 
     async def show_me(self) -> None:
         render_banner(await self.service.me_info())
@@ -248,49 +283,53 @@ class App:
         try:
             await self._run_menu_choice(choice)
         except Exception as e:
-            error(f"{e}")
+            error(str(e))
 
     async def _run_menu_choice(self, choice: int) -> None:
+        match choice:
+            case 0:
+                await self.show_dialogs()
+            case 1:
+                target = await self._ask_target("read")
+                if target:
+                    await self.view_messages(target)
+            case 2:
+                target = await self._ask_target("message")
+                if target:
+                    text = console.input(f"[bold cyan]Message for {escape(str(target))}:[/bold cyan] ")
+                    if text.strip():
+                        await self.send_message(target, text)
+            case 3:
+                query = console.input("[bold cyan]Search chats:[/bold cyan] ").strip()
+                if query:
+                    await self.search(query)
+            case 4:
+                await self.stats()
+            case 5:
+                target = console.input("[bold cyan]Channel/user (@username or id):[/bold cyan] ").strip()
+                if target:
+                    await self.entity_info(target)
+            case 6:
+                await self._membership_menu()
+            case 7:
+                self.render_help()
+            case 8:
+                raise SystemExit(0)
+
+    async def _membership_menu(self) -> None:
+        sub = InteractiveMenu("Membership", [
+            ("➕  Join a channel", "by @username"),
+            ("➖  Leave a channel", "pick from your chats"),
+        ])
+        choice = sub.select()
         if choice == 0:
-            await self.show_dialogs()
+            target = console.input("[bold cyan]Channel to join (@username):[/bold cyan] ").strip()
+            if target:
+                await self.join(target)
         elif choice == 1:
-            target = await self._ask_target("read")
+            target = await self._ask_target("leave")
             if target:
-                await self.view_messages(target)
-        elif choice == 2:
-            target = await self._ask_target("message")
-            if target:
-                text = console.input(f"[bold cyan]Message for {target}:[/bold cyan] ")
-                if text.strip():
-                    await self.send_message(target, text)
-        elif choice == 3:
-            query = console.input("[bold cyan]Search chats:[/bold cyan] ").strip()
-            if query:
-                await self.search(query)
-        elif choice == 4:
-            await self.stats()
-        elif choice == 5:
-            target = console.input("[bold cyan]Channel/user (@username or id):[/bold cyan] ").strip()
-            if target:
-                await self.entity_info(target)
-        elif choice == 6:
-            sub = InteractiveMenu("Membership", [
-                ("➕  Join a channel", "by @username"),
-                ("➖  Leave a channel", "pick from your chats"),
-            ])
-            sub_choice = sub.select()
-            if sub_choice == 0:
-                target = console.input("[bold cyan]Channel to join (@username):[/bold cyan] ").strip()
-                if target:
-                    await self.join(target)
-            elif sub_choice == 1:
-                target = await self._ask_target("leave")
-                if target:
-                    await self.leave(target)
-        elif choice == 7:
-            self.render_help()
-        elif choice == 8:
-            raise SystemExit(0)
+                await self.leave(target)
 
     # ── main loop ───────────────────────────────────────────────────────────
 
@@ -298,10 +337,11 @@ class App:
         with busy("Signing in…"):
             self.me = await self.service.me_info()
         render_banner(self.me)
+        name = escape(self.me["name"])
         console.print(
-            f"[{DIM}]Welcome, [bold]{escape(self.me['name'])}[/bold]! "
-            "Type[/] [bold green]/menu[/] " f"[{DIM}]for the interactive hub or[/] "
-            "[bold green]/help[/] " f"[{DIM}]for all commands.[/]\n"
+            f"[{DIM}]Welcome, [bold]{name}[/bold]! Type[/] [bold green]/menu[/] "
+            f"[{DIM}]for the interactive hub or[/] [bold green]/help[/] "
+            f"[{DIM}]for all commands.[/]\n"
         )
 
         session = PromptSession(history=InMemoryHistory(), complete_while_typing=True)
@@ -350,42 +390,42 @@ class App:
             await self.show_dialogs()
         elif cmd == "/view":
             if not args:
-                warn("Usage: /view <@username | #index | id> [count]")
+                warn(_usage(cmd))
             else:
                 parts = args.split()
-                limit = max(1, int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else 15
-                await self.view_messages(parts[0], limit)
+                limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 15
+                await self.view_messages(parts[0], max(1, limit))
         elif cmd == "/info":
             if args:
                 await self.entity_info(args)
             else:
-                warn("Usage: /info <@username | id>")
+                warn(_usage(cmd))
         elif cmd in ("/send", "/reply"):
-            parts = args.split(" ", 1)
-            if len(parts) < 2:
-                warn(f"Usage: {cmd} <@target | #index> <message>")
+            target, _, message = args.partition(" ")
+            if target and message:
+                await self.send_message(target, message)
             else:
-                await self.send_message(parts[0], parts[1])
+                warn(_usage(cmd))
         elif cmd == "/join":
             if args:
                 await self.join(args)
             else:
-                warn("Usage: /join <@channel>")
+                warn(_usage(cmd))
         elif cmd == "/leave":
             if args:
                 await self.leave(args)
             else:
-                warn("Usage: /leave <@channel>")
+                warn(_usage(cmd))
         elif cmd == "/read":
             if args:
                 await self.mark_read(args)
             else:
-                warn("Usage: /read <@target | #index>")
+                warn(_usage(cmd))
         elif cmd == "/search":
             if args:
                 await self.search(args)
             else:
-                warn("Usage: /search <query>")
+                warn(_usage(cmd))
         elif cmd == "/stats":
             await self.stats()
         elif cmd == "/me":

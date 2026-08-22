@@ -137,7 +137,6 @@ class InteractiveMenu:
             return None
         finally:
             sys.stdout.write("\x1b[?7h")  # re-enable autowrap
-            sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             sys.stdout.flush()
 

@@ -10,17 +10,21 @@ from .. import __version__
 
 console = make_console()
 
-BANNER_ART = Text()
-for i, line in enumerate([
+_BANNER_LINES = [
     " ████████╗ ███████╗ ██╗      ███████╗  ██████╗  ██████╗   █████╗  ███╗   ███╗         ██████╗ ███████╗",
     " ╚══██╔══╝ ██╔════╝ ██║      ██╔════╝ ██╔════╝  ██╔══██╗ ██╔══██╗ ████╗ ████║        ██╔════╝ ██╔════╝",
     "    ██║    █████╗   ██║      █████╗   ██║  ███╗ ██████╔╝ ███████║ ██╔████╔██║ █████╗ ██║      █████╗",
-    "    ██║    ██╔══╝   ██║      ██╔══╝   ██║   ██║ ██╔══██╗ ██╔══██║ ██║╚██╔╝██║ ╚════╝ ██║      ██╔══╝",
+    "    ██║    ██╔══╝   ██║      ██╔══╝   ██║   ██║ ██╔══██╗ ██╔══██╗ ██║╚██╔╝██║ ╚════╝ ██║      ██╔══╝",
     "    ██║    ███████╗ ███████╗ ███████╗ ╚██████╔╝ ██║  ██║ ██║  ██║ ██║ ╚═╝ ██║        ╚██████╗ ███████╗",
     "    ╚═╝    ╚══════╝ ╚══════╝ ╚══════╝  ╚═════╝  ╚═╝  ╚═╝ ╚═╝  ╚═╝ ╚═╝     ╚═╝         ╚═════╝ ╚══════╝",
-]):
-    gradient = ["bright_cyan", "bright_blue", "bright_magenta", "bright_blue", "bright_cyan", "cyan"][i]
-    BANNER_ART.append(line + "\n", style=f"bold {gradient}")
+]
+_BANNER_GRADIENT = [
+    "bright_cyan", "bright_blue", "bright_magenta", "bright_blue", "bright_cyan", "cyan",
+]
+
+BANNER_ART = Text()
+for line, color in zip(_BANNER_LINES, _BANNER_GRADIENT):
+    BANNER_ART.append(line + "\n", style=f"bold {color}")
 
 
 def render_banner(me: dict | None = None) -> None:
