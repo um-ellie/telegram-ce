@@ -82,7 +82,11 @@ class InteractiveMenu:
         """Render the menu into a real string with newlines — str(Panel) would
         just produce the object repr, which is what once printed garbage."""
         buf = StringIO()
-        renderer = Console(file=buf, width=console.width, no_color=console.no_color)
+        # 2-column safety margin: terminals disagree with rich on emoji widths
+        # (e.g. ℹ️ + VS16 renders 2 cells while rich counts 1), and a line that
+        # overflows the real width wraps onto an extra screen row.
+        renderer = Console(file=buf, width=max(console.width - 2, 20),
+                           no_color=console.no_color)
         renderer.print(self._build_panel(selected))
         return buf.getvalue()
 
@@ -99,10 +103,17 @@ class InteractiveMenu:
         old_settings = termios.tcgetattr(fd)
         try:
             tty.setraw(fd)
+            # autowrap off: any line the terminal measures wider than rich must
+            # be clipped at the right edge, never wrapped onto an extra row —
+            # wrapped rows desync the cursor-up count and the menu smears.
+            sys.stdout.write("\x1b[?7l")
             while True:
                 rendered = self._render_str(selected)
                 n_lines = rendered.count("\n")
-                sys.stdout.write(rendered)
+                # explicit CRLF per line: raw mode disables ONLCR, so a bare \n
+                # moves down without returning to column 0 and staircases the
+                # panel on terminals that honor that literally
+                sys.stdout.write("\r" + rendered.replace("\n", "\r\n"))
                 sys.stdout.flush()
 
                 key = _read_key()
@@ -125,6 +136,8 @@ class InteractiveMenu:
         except (KeyboardInterrupt, EOFError):
             return None
         finally:
+            sys.stdout.write("\x1b[?7h")  # re-enable autowrap
+            sys.stdout.flush()
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
             sys.stdout.flush()
 
