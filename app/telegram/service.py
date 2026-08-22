@@ -1,0 +1,272 @@
+"""High-level Telegram operations exposed to the UI layer."""
+
+from datetime import datetime, timezone
+
+from telethon import events, functions
+from telethon.tl.types import (
+    Channel, Chat, User,
+    MessageMediaPhoto, MessageMediaDocument,
+    MessageMediaPoll, MessageMediaGeo, MessageMediaContact,
+    MessageMediaWebPage,
+)
+
+MEDIA_ICONS = {
+    "Photo": "🖼️",
+    "Video": "🎬",
+    "Voice/Audio": "🎧",
+    "Image": "🖼️",
+    "Document/File": "📄",
+    "Poll": "📊",
+    "Location": "📍",
+    "Contact": "👤",
+    "Web Link": "🔗",
+    "Attachment": "📎",
+}
+
+
+def detect_media_type(media) -> str | None:
+    """Return a human-readable label for message media."""
+    if not media:
+        return None
+    if isinstance(media, MessageMediaPhoto):
+        return "Photo"
+    if isinstance(media, MessageMediaDocument):
+        doc = getattr(media, "document", None)
+        mime = getattr(doc, "mime_type", "") or ""
+        if "video" in mime:
+            return "Video"
+        if "audio" in mime or "ogg" in mime:
+            return "Voice/Audio"
+        if "image" in mime:
+            return "Image"
+        return "Document/File"
+    if isinstance(media, MessageMediaPoll):
+        return "Poll"
+    if isinstance(media, MessageMediaGeo):
+        return "Location"
+    if isinstance(media, MessageMediaContact):
+        return "Contact"
+    if isinstance(media, MessageMediaWebPage):
+        return "Web Link"
+    return "Attachment"
+
+
+def media_icon(media_type: str | None) -> str:
+    if not media_type:
+        return ""
+    return MEDIA_ICONS.get(media_type, "📎")
+
+
+def _entity_type(entity) -> str:
+    if isinstance(entity, Channel):
+        return "Channel" if entity.broadcast else "Group"
+    if isinstance(entity, Chat):
+        return "Group"
+    if isinstance(entity, User):
+        return "Bot" if getattr(entity, "bot", False) else "User"
+    return "User"
+
+
+def _sender_display(sender) -> tuple[str, str]:
+    """Return (display_name, username) for a sender entity."""
+    if sender is None:
+        return "Unknown", ""
+    if isinstance(sender, User):
+        name = f"{sender.first_name or ''} {sender.last_name or ''}".strip() or "User"
+        return name, sender.username or ""
+    if isinstance(sender, (Channel, Chat)):
+        return getattr(sender, "title", "Chat"), getattr(sender, "username", "") or ""
+    return "Unknown", ""
+
+
+def _fmt_date(date) -> str:
+    if not date:
+        return ""
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return date.astimezone().strftime("%Y-%m-%d %H:%M")
+
+
+def _fmt_time(date) -> str:
+    if not date:
+        return ""
+    if date.tzinfo is None:
+        date = date.replace(tzinfo=timezone.utc)
+    return date.astimezone().strftime("%H:%M")
+
+
+class TelegramService:
+    """Every Telegram operation the UI needs, returned as plain dicts."""
+
+    def __init__(self, connection):
+        self.client = connection.client
+
+    # ── account ────────────────────────────────────────────────────────────
+
+    async def get_me(self):
+        return await self.client.get_me()
+
+    async def me_info(self) -> dict:
+        me = await self.get_me()
+        return {
+            "id": me.id,
+            "name": f"{me.first_name or ''} {me.last_name or ''}".strip() or "User",
+            "username": me.username or "",
+            "phone": f"+{me.phone}" if me.phone else "Hidden",
+            "premium": bool(getattr(me, "premium", False)),
+        }
+
+    async def stats(self) -> dict:
+        """Aggregate account statistics across all dialogs."""
+        dialogs = await self.client.get_dialogs(limit=None)
+        counts = {"Channel": 0, "Group": 0, "User": 0, "Bot": 0}
+        unread = 0
+        pinned = 0
+        for d in dialogs:
+            counts[_entity_type(d.entity)] += 1
+            unread += d.unread_count
+            pinned += 1 if d.pinned else 0
+        return {
+            "total": len(dialogs),
+            "channels": counts["Channel"],
+            "groups": counts["Group"],
+            "users": counts["User"],
+            "bots": counts["Bot"],
+            "unread": unread,
+            "pinned": pinned,
+        }
+
+    # ── dialogs ────────────────────────────────────────────────────────────
+
+    async def get_dialogs(self, limit: int = 50) -> list[dict]:
+        dialogs = await self.client.get_dialogs(limit=limit)
+        result = []
+        for d in dialogs:
+            entity = d.entity
+            last_msg_text = ""
+            if d.message:
+                last_msg_text = d.message.message or ""
+                if not last_msg_text:
+                    label = detect_media_type(d.message.media)
+                    if label:
+                        last_msg_text = f"{media_icon(label)} {label}"
+
+            result.append({
+                "id": d.id,
+                "title": d.name or "Unknown",
+                "username": getattr(entity, "username", "") or "",
+                "type": _entity_type(entity),
+                "unread_count": d.unread_count,
+                "pinned": d.pinned,
+                # unread mentions live on the dialog, not the message (and are
+                # named differently across Telethon versions — read defensively)
+                "mentions": getattr(d, "mentions_count", 0)
+                or getattr(getattr(d, "dialog", None), "unread_mentions_count", 0),
+                "last_message": last_msg_text[:80],
+                "date": _fmt_date(d.date),
+            })
+        return result
+
+    async def mark_read(self, target: str) -> None:
+        await self.client.send_read_acknowledge(target)
+
+    # ── messages ───────────────────────────────────────────────────────────
+
+    async def get_messages(self, target: str, limit: int = 20) -> list[dict]:
+        messages = await self.client.get_messages(target, limit=limit)
+        result = []
+        for msg in messages:
+            if not msg:
+                continue
+            sender, username = _sender_display(msg.sender)
+            result.append({
+                "id": msg.id,
+                "date": _fmt_date(msg.date),
+                "time": _fmt_time(msg.date),
+                "sender": sender,
+                "username": username,
+                "text": msg.message or "",
+                "views": getattr(msg, "views", None),
+                "forwards": getattr(msg, "forwards", None),
+                "media_type": detect_media_type(msg.media),
+                "out": bool(msg.out),
+            })
+        return result
+
+    async def send_message(self, target: str, text: str):
+        return await self.client.send_message(target, text)
+
+    async def delete_message(self, target: str, msg_id: int):
+        await self.client.delete_messages(target, [msg_id])
+
+    # ── entities ───────────────────────────────────────────────────────────
+
+    async def entity_info(self, target: str) -> dict:
+        entity = await self.client.get_entity(target)
+
+        full = None
+        if isinstance(entity, Channel):
+            full = await self.client(functions.channels.GetFullChannelRequest(entity))
+
+        title = getattr(entity, "title", None) or getattr(entity, "first_name", "Chat")
+        username = getattr(entity, "username", "") or ""
+
+        if full:
+            participants = getattr(full.full_chat, "participants_count", None)
+            about = getattr(full.full_chat, "about", "") or ""
+        else:
+            participants = getattr(entity, "participants_count", None)
+            about = ""
+
+        return {
+            "id": entity.id,
+            "title": title,
+            "username": username,
+            "type": _entity_type(entity),
+            "participants_count": participants,
+            "about": about,
+            "verified": bool(getattr(entity, "verified", False)),
+        }
+
+    async def join_channel(self, target: str):
+        return await self.client(functions.channels.JoinChannelRequest(target))
+
+    async def leave_channel(self, target: str):
+        return await self.client(functions.channels.LeaveChannelRequest(target))
+
+    # ── search ─────────────────────────────────────────────────────────────
+
+    async def search_dialogs(self, query: str) -> list[dict]:
+        query = query.lower()
+        dialogs = await self.get_dialogs(limit=None)
+        return [
+            d for d in dialogs
+            if query in d["title"].lower() or query in d["username"].lower()
+        ]
+
+    # ── live feed ──────────────────────────────────────────────────────────
+
+    def register_message_handler(self, callback):
+        @self.client.on(events.NewMessage)
+        async def handler(event):
+            sender = await event.get_sender()
+            sender_name, username = _sender_display(sender)
+
+            chat = await event.get_chat()
+            chat_title = (
+                getattr(chat, "title", None)
+                or getattr(chat, "first_name", None)
+                or "Private Chat"
+            )
+
+            await callback({
+                "id": event.id,
+                "sender": sender_name,
+                "username": username,
+                "text": event.text or "",
+                "chat_title": chat_title,
+                "chat_id": event.chat_id,
+                "is_channel": isinstance(chat, Channel) and chat.broadcast,
+                "media_type": detect_media_type(event.message.media),
+                "time": datetime.now().strftime("%H:%M"),
+            })
