@@ -11,6 +11,11 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
-RUN mkdir -p /app/data
+
+# dedicated unprivileged user; owns /app/data so the session volume stays writable
+RUN useradd --create-home tguser \
+    && mkdir -p /app/data \
+    && chown -R tguser:tguser /app/data
+USER tguser
 
 CMD ["python", "-m", "app"]

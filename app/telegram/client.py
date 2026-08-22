@@ -2,6 +2,7 @@
 
 import getpass
 import io
+import os
 
 import qrcode
 from ..ui.theme import make_console
@@ -88,6 +89,7 @@ class TelegramConnection:
 
     def __init__(self, api_id: int, api_hash: str, session_path: str):
         self.client = TelegramClient(session_path, api_id, api_hash)
+        self.session_path = session_path
         self._logged_in_interactively = False
 
     async def start(self) -> None:
@@ -106,7 +108,17 @@ class TelegramConnection:
             await self._login_interactively()
             self._logged_in_interactively = True
 
+        # the session file holds the auth key (= full account access):
+        # keep it readable by the owner only
+        self._restrict_session_perms()
+
         await self.client.get_me()  # warm up the session
+
+    def _restrict_session_perms(self) -> None:
+        try:
+            os.chmod(self.session_path + ".session", 0o600)
+        except OSError:
+            pass  # fresh/missing session file — nothing to lock down yet
 
     async def _login_interactively(self) -> None:
         from ..ui.menu import InteractiveMenu  # local import: ui layer stays optional

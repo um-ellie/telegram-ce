@@ -1,6 +1,7 @@
 """Application banner and header rendering."""
 
 from .theme import make_console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
@@ -34,11 +35,12 @@ def render_banner(me: dict | None = None) -> None:
     )
 
     if me:
-        username = f"@{me['username']}" if me["username"] else "no username"
+        name = escape(me["name"])
+        username = f"@{escape(me['username'])}" if me["username"] else "no username"
         premium = " ✦ Premium" if me.get("premium") else ""
         body = (
             f"[bold bright_green]● Signed in[/bold bright_green]  "
-            f"[bold white]{me['name']}[/bold white]{premium}\n"
+            f"[bold white]{name}[/bold white]{premium}\n"
             f"[bright_cyan]{username}[/bright_cyan]  [dim]·[/dim]  "
             f"[bright_yellow]{me['phone']}[/bright_yellow]  [dim]·[/dim]  "
             f"[dim]ID {me['id']}[/dim]"

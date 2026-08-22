@@ -8,6 +8,9 @@ services:
     stdin_open: true
     tty: true
 
+    security_opt:
+      - no-new-privileges:true
+
     env_file:
       - .env
 

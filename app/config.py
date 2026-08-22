@@ -7,7 +7,11 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATA_DIR = os.environ.get("TELEGRAM_CE_DATA_DIR", "/app/data")
+# Docker images set TELEGRAM_CE_DATA_DIR=/app/data; outside Docker fall back to
+# a per-user directory so the app never tries to write to the filesystem root
+DEFAULT_DATA_DIR = os.path.join(os.path.expanduser("~"), ".telegram-ce")
+
+DATA_DIR = os.environ.get("TELEGRAM_CE_DATA_DIR", "") or DEFAULT_DATA_DIR
 
 
 class ConfigError(RuntimeError):
@@ -37,7 +41,14 @@ def load_config() -> Config:
     if not api_id.isdigit():
         raise ConfigError("TELEGRAM_API_ID must be a numeric value.")
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        os.makedirs(DATA_DIR, exist_ok=True)
+        os.chmod(DATA_DIR, 0o700)  # holds the session file — owner-only
+    except OSError as e:
+        raise ConfigError(
+            f"Cannot create the data directory {DATA_DIR!r}: {e}\n"
+            "Set TELEGRAM_CE_DATA_DIR to a writable path and try again."
+        ) from e
 
     return Config(
         api_id=int(api_id),

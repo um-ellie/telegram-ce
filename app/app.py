@@ -7,6 +7,7 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit import PromptSession
+from rich.markup import escape
 from rich.table import Table
 
 from .commands import ALIASES, COMMANDS
@@ -122,7 +123,7 @@ class App:
 
     async def view_messages(self, target: str, limit: int = 15) -> None:
         target = self._resolve_target(target)
-        with busy(f"Fetching messages from {target}…"):
+        with busy(f"Fetching messages from {escape(target)}…"):
             try:
                 messages = await self.service.get_messages(target, limit=limit)
             except Exception as e:
@@ -132,7 +133,7 @@ class App:
 
     async def entity_info(self, target: str) -> None:
         target = self._resolve_target(target)
-        with busy(f"Fetching info for {target}…"):
+        with busy(f"Fetching info for {escape(target)}…"):
             try:
                 info = await self.service.entity_info(target)
             except Exception as e:
@@ -142,51 +143,51 @@ class App:
 
     async def send_message(self, target: str, text: str) -> None:
         target = self._resolve_target(target)
-        with busy(f"Sending to {target}…"):
+        with busy(f"Sending to {escape(target)}…"):
             try:
                 await self.service.send_message(target, text)
             except Exception as e:
                 error(f"Failed to send: {e}")
                 return
-        ok(f"Message sent to [bold]{target}[/bold]")
+        ok(f"Message sent to [bold]{escape(target)}[/bold]")
 
     async def join(self, target: str) -> None:
-        with busy(f"Joining {target}…"):
+        with busy(f"Joining {escape(target)}…"):
             try:
                 await self.service.join_channel(target)
             except Exception as e:
                 error(f"Failed to join: {e}")
                 return
         self.cached_dialogs = []
-        ok(f"Joined [bold]{target}[/bold]")
+        ok(f"Joined [bold]{escape(target)}[/bold]")
 
     async def leave(self, target: str) -> None:
-        with busy(f"Leaving {target}…"):
+        with busy(f"Leaving {escape(target)}…"):
             try:
                 await self.service.leave_channel(target)
             except Exception as e:
                 error(f"Failed to leave: {e}")
                 return
         self.cached_dialogs = []
-        warn(f"Left [bold]{target}[/bold]")
+        warn(f"Left [bold]{escape(target)}[/bold]")
 
     async def mark_read(self, target: str) -> None:
         target = self._resolve_target(target)
         try:
             await self.service.mark_read(target)
-            ok(f"Marked [bold]{target}[/bold] as read")
+            ok(f"Marked [bold]{escape(target)}[/bold] as read")
         except Exception as e:
             error(f"Failed: {e}")
 
     async def search(self, query: str) -> None:
-        with busy(f"Searching for '{query}'…"):
+        with busy(f"Searching for '{escape(query)}'…"):
             try:
                 results = await self.service.search_dialogs(query)
             except Exception as e:
                 error(f"Search failed: {e}")
                 return
         if not results:
-            warn(f"No chats matching '{query}'")
+            warn(f"No chats matching '{escape(query)}'")
             return
         render_dialogs(results)
 
@@ -224,8 +225,13 @@ class App:
     # ── live feed ───────────────────────────────────────────────────────────
 
     async def on_live_message(self, msg: dict) -> None:
-        if self.live_feed_enabled:
+        if not self.live_feed_enabled:
+            return
+        try:
             render_live_message(msg)
+        except Exception:
+            # a single malformed message must never break the event loop
+            warn("Skipped a live message that could not be rendered.")
 
     # ── hub menu ────────────────────────────────────────────────────────────
 
@@ -288,7 +294,7 @@ class App:
             self.me = await self.service.me_info()
         render_banner(self.me)
         console.print(
-            f"[{DIM}]Welcome, [bold]{self.me['name']}[/bold]! "
+            f"[{DIM}]Welcome, [bold]{escape(self.me['name'])}[/bold]! "
             "Type[/] [bold green]/menu[/] " f"[{DIM}]for the interactive hub or[/] "
             "[bold green]/help[/] " f"[{DIM}]for all commands.[/]\n"
         )

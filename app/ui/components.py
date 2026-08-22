@@ -3,6 +3,7 @@
 import textwrap
 
 from rich.console import Console
+from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
@@ -67,8 +68,8 @@ def render_dialogs(dialogs: list[dict]) -> None:
             if unread > 0 else f"[{DIM}]·[/]"
         )
 
-        name = ("📌 " if d["pinned"] else "") + d["title"]
-        username = f"@{d['username']}" if d["username"] else f"[{DIM}]—[{DIM}]"
+        name = ("📌 " if d["pinned"] else "") + escape(d["title"])
+        username = f"@{escape(d['username'])}" if d["username"] else f"[{DIM}]—[{DIM}]"
 
         table.add_row(str(idx), type_cell, name, username, unread_cell, d["date"])
 
@@ -89,8 +90,8 @@ def render_messages(target: str, messages: list[dict]) -> None:
         )
     )
     for msg in reversed(messages):
-        sender = msg["sender"]
-        at = f" [dim](@{msg['username']})[/dim]" if msg["username"] else ""
+        sender = escape(msg["sender"])
+        at = f" [dim](@{escape(msg['username'])})[/dim]" if msg["username"] else ""
         icon = media_icon(msg["media_type"])
 
         footer = [msg["time"] or msg["date"]]
@@ -120,25 +121,26 @@ def render_messages(target: str, messages: list[dict]) -> None:
             expand=False,
             width=min(MAX_BODY_WIDTH + 6, console.width),
         ))
-    console.print(f"[{DIM}]Reply with[/] [bold green]/send {target} <message>[/]\n")
+    console.print(f"[{DIM}]Reply with[/] [bold green]/send {escape(target)} <message>[/]\n")
 
 
 def render_entity_info(info: dict) -> None:
-    username = f"@{info['username']}" if info["username"] else "—"
+    title = escape(info["title"])
+    username = f"@{escape(info['username'])}" if info["username"] else "—"
     count = f"{info['participants_count']:,}" if info["participants_count"] else "Unknown"
     verified = "  ✔️ verified" if info["verified"] else ""
 
     content = (
-        f"[bold bright_cyan]Title[/]      {info['title']}{verified}\n"
+        f"[bold bright_cyan]Title[/]      {title}{verified}\n"
         f"[bold bright_yellow]Username[/]   {username}\n"
         f"[bold bright_magenta]Type[/]       {info['type']}\n"
         f"[bold bright_green]Members[/]    {count}\n"
         f"[bold bright_blue]ID[/]          [dim]{info['id']}[/dim]\n\n"
-        f"[bold white]About[/]\n[dim]{info['about'] or 'No description provided.'}[/dim]"
+        f"[bold white]About[/]\n[dim]{escape(info['about'] or 'No description provided.')}[/dim]"
     )
     console.print(Panel(
         content,
-        title=f"[bold bright_green]ℹ  {info['title']}[/]",
+        title=f"[bold bright_green]ℹ  {title}[/]",
         border_style=WARN,
         box=BOX_DOUBLE,
     ))
@@ -172,7 +174,6 @@ def render_stats(stats: dict) -> None:
 def render_live_message(msg: dict) -> None:
     """Render an incoming live message: compact, wrapped, never full-width."""
     icon = media_icon(msg["media_type"])
-    at = f" [dim]@{msg['username']}[/dim]" if msg["username"] else ""
     tag = "📢" if msg["is_channel"] else "💬"
 
     if msg["text"]:
@@ -184,7 +185,8 @@ def render_live_message(msg: dict) -> None:
 
     # header by chat type: channels post as themselves; in DMs (positive peer
     # id) the chat and the sender are the same person, so show it once
-    chat, sender = msg["chat_title"].strip(), msg["sender"].strip()
+    chat, sender = escape(msg["chat_title"].strip()), escape(msg["sender"].strip())
+    at = f" [dim]@{escape(msg['username'])}[/dim]" if msg["username"] else ""
     is_dm = (msg.get("chat_id") or 0) > 0
     if msg["is_channel"] or not sender or is_dm or chat.lower() == sender.lower():
         header = f"{tag} {sender or chat}{at}"
