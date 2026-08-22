@@ -7,9 +7,12 @@ services:
     # Interactive terminal app — attach with: docker compose run --rm telegram-ce
     stdin_open: true
     tty: true
+    init: true
 
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
 
     env_file:
       - .env

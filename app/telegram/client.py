@@ -5,7 +5,6 @@ import io
 import os
 
 import qrcode
-from ..ui.theme import make_console
 from rich.panel import Panel
 
 from telethon import TelegramClient
@@ -21,6 +20,8 @@ from telethon.errors import (
     RPCError,
     SessionPasswordNeededError,
 )
+
+from ..ui.theme import make_console
 
 console = make_console()
 
@@ -90,7 +91,6 @@ class TelegramConnection:
     def __init__(self, api_id: int, api_hash: str, session_path: str):
         self.client = TelegramClient(session_path, api_id, api_hash)
         self.session_path = session_path
-        self._logged_in_interactively = False
 
     async def start(self) -> None:
         """Connect and authenticate, prompting for phone/code/2FA if needed."""
@@ -100,13 +100,12 @@ class TelegramConnection:
             console.print("")
             console.print(Panel(
                 "[bold bright_yellow]First run — interactive login required.[/]\n"
-                "[dim]Your session will be saved to the Docker volume and reused "
+                "[dim]Your session will be saved locally and reused "
                 "automatically afterwards.[/]",
                 title="[bold bright_white]🔐  Login[/]",
                 border_style="bright_yellow",
             ))
             await self._login_interactively()
-            self._logged_in_interactively = True
 
         # the session file holds the auth key (= full account access):
         # keep it readable by the owner only
@@ -288,10 +287,6 @@ class TelegramConnection:
                 raise LoginAborted(
                     f"Too many password attempts — wait {_fmt_wait(e.seconds)} and retry."
                 )
-
-    @property
-    def logged_in_interactively(self) -> bool:
-        return self._logged_in_interactively
 
     async def stop(self) -> None:
         await self.client.disconnect()

@@ -1,11 +1,10 @@
 """Application banner and header rendering."""
 
-from .theme import make_console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
-from .theme import ACCENT, ACCENT_2, BOX, TITLE
+from .theme import ACCENT, BOX, TITLE, make_console
 
 from .. import __version__
 

@@ -2,7 +2,6 @@
 
 import textwrap
 
-from rich.console import Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.table import Table
@@ -69,7 +68,7 @@ def render_dialogs(dialogs: list[dict]) -> None:
         )
 
         name = ("📌 " if d["pinned"] else "") + escape(d["title"])
-        username = f"@{escape(d['username'])}" if d["username"] else f"[{DIM}]—[{DIM}]"
+        username = f"@{escape(d['username'])}" if d["username"] else f"[{DIM}]—[/{DIM}]"
 
         table.add_row(str(idx), type_cell, name, username, unread_cell, d["date"])
 
@@ -80,7 +79,7 @@ def render_dialogs(dialogs: list[dict]) -> None:
     )
 
 
-def render_messages(target: str, messages: list[dict]) -> None:
+def render_messages(target: str | int, messages: list[dict]) -> None:
     console.print(
         Panel(
             f"[bold bright_white]📜  {len(messages)} recent messages[/]"
@@ -121,7 +120,7 @@ def render_messages(target: str, messages: list[dict]) -> None:
             expand=False,
             width=min(MAX_BODY_WIDTH + 6, console.width),
         ))
-    console.print(f"[{DIM}]Reply with[/] [bold green]/send {escape(target)} <message>[/]\n")
+    console.print(f"[{DIM}]Reply with[/] [bold green]/send {escape(str(target))} <message>[/]\n")
 
 
 def render_entity_info(info: dict) -> None:
@@ -161,8 +160,6 @@ def render_stats(stats: dict) -> None:
     ]
     for label, value in rows:
         table.add_row(label, f"{value:,}")
-        if label.startswith("✉"):
-            table.add_row("─" * 14, "─" * 8, style=DIM)
 
     console.print(Panel(
         table,

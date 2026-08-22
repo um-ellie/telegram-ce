@@ -103,11 +103,8 @@ class TelegramService:
 
     # ── account ────────────────────────────────────────────────────────────
 
-    async def get_me(self):
-        return await self.client.get_me()
-
     async def me_info(self) -> dict:
-        me = await self.get_me()
+        me = await self.client.get_me()
         return {
             "id": me.id,
             "name": f"{me.first_name or ''} {me.last_name or ''}".strip() or "User",
@@ -140,39 +137,25 @@ class TelegramService:
 
     async def get_dialogs(self, limit: int = 50) -> list[dict]:
         dialogs = await self.client.get_dialogs(limit=limit)
-        result = []
-        for d in dialogs:
-            entity = d.entity
-            last_msg_text = ""
-            if d.message:
-                last_msg_text = d.message.message or ""
-                if not last_msg_text:
-                    label = detect_media_type(d.message.media)
-                    if label:
-                        last_msg_text = f"{media_icon(label)} {label}"
-
-            result.append({
+        return [
+            {
                 "id": d.id,
                 "title": d.name or "Unknown",
-                "username": getattr(entity, "username", "") or "",
-                "type": _entity_type(entity),
+                "username": getattr(d.entity, "username", "") or "",
+                "type": _entity_type(d.entity),
                 "unread_count": d.unread_count,
                 "pinned": d.pinned,
-                # unread mentions live on the dialog, not the message (and are
-                # named differently across Telethon versions — read defensively)
-                "mentions": getattr(d, "mentions_count", 0)
-                or getattr(getattr(d, "dialog", None), "unread_mentions_count", 0),
-                "last_message": last_msg_text[:80],
                 "date": _fmt_date(d.date),
-            })
-        return result
+            }
+            for d in dialogs
+        ]
 
-    async def mark_read(self, target: str) -> None:
+    async def mark_read(self, target: str | int) -> None:
         await self.client.send_read_acknowledge(target)
 
     # ── messages ───────────────────────────────────────────────────────────
 
-    async def get_messages(self, target: str, limit: int = 20) -> list[dict]:
+    async def get_messages(self, target: str | int, limit: int = 20) -> list[dict]:
         messages = await self.client.get_messages(target, limit=limit)
         result = []
         for msg in messages:
@@ -193,15 +176,12 @@ class TelegramService:
             })
         return result
 
-    async def send_message(self, target: str, text: str):
+    async def send_message(self, target: str | int, text: str):
         return await self.client.send_message(target, text)
-
-    async def delete_message(self, target: str, msg_id: int):
-        await self.client.delete_messages(target, [msg_id])
 
     # ── entities ───────────────────────────────────────────────────────────
 
-    async def entity_info(self, target: str) -> dict:
+    async def entity_info(self, target: str | int) -> dict:
         entity = await self.client.get_entity(target)
 
         full = None
@@ -228,10 +208,10 @@ class TelegramService:
             "verified": bool(getattr(entity, "verified", False)),
         }
 
-    async def join_channel(self, target: str):
+    async def join_channel(self, target: str | int):
         return await self.client(functions.channels.JoinChannelRequest(target))
 
-    async def leave_channel(self, target: str):
+    async def leave_channel(self, target: str | int):
         return await self.client(functions.channels.LeaveChannelRequest(target))
 
     # ── search ─────────────────────────────────────────────────────────────

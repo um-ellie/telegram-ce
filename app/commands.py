@@ -23,3 +23,8 @@ ALIASES = {
     "/channels": "/chats",
     "/exit": "/quit",
 }
+
+# commands whose last argument is a chat target (used by the autocompleter)
+TARGET_COMMANDS = frozenset({
+    "/view", "/info", "/send", "/reply", "/join", "/leave", "/read",
+})

@@ -38,7 +38,7 @@ async def main() -> None:
         await app.run()
     finally:
         await connection.stop()
-        console.print("[dim]Disconnected. See you soon! ✈️[/dim]")
+        console.print("[dim]Disconnected.🔴[/dim]")
 
 
 if __name__ == "__main__":

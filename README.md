@@ -95,7 +95,7 @@ export TELEGRAM_API_ID=... TELEGRAM_API_HASH=...
 python -m app
 ```
 
-The session file then defaults to `/app/data`; override the directory with the
+The session file then defaults to `~/.telegram-ce`; override the directory with the
 `TELEGRAM_CE_DATA_DIR` environment variable.
 
 ## Commands
@@ -239,7 +239,7 @@ export TELEGRAM_API_ID=... TELEGRAM_API_HASH=...
 python -m app
 ```
 
-در این حالت فایل سشن به‌صورت پیش‌فرض در `/app/data` ذخیره می‌شود؛ با متغیر محیطی
+در این حالت فایل سشن به‌صورت پیش‌فرض در `~/.telegram-ce` ذخیره می‌شود؛ با متغیر محیطی
 `TELEGRAM_CE_DATA_DIR` می‌توانید مسیر آن را عوض کنید.
 
 ## دستورها

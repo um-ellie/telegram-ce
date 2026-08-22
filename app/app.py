@@ -10,21 +10,20 @@ from prompt_toolkit import PromptSession
 from rich.markup import escape
 from rich.table import Table
 
-from .commands import ALIASES, COMMANDS
+from .commands import ALIASES, COMMANDS, TARGET_COMMANDS
 from .ui import InteractiveMenu
-from .ui.theme import make_console
 from .ui.banner import render_banner
 from .ui.components import (
     busy, error, ok, render_dialogs, render_entity_info, render_live_message,
     render_messages, render_stats, warn,
 )
-from .ui.theme import ACCENT, ACCENT_2, BOX, DIM
+from .ui.theme import ACCENT, ACCENT_2, BOX, DIM, make_console
 
 console = make_console()
 
 # prompt_toolkit formatted text (its own HTML dialect, not rich markup)
 PROMPT = HTML(
-    '✈️ <ansicyan><b>tg</b></ansicyan><ansibrightmagenta>·</ansibrightmagenta>'
+    '🔵️ <ansicyan><b>tg</b></ansicyan><ansibrightmagenta>·</ansibrightmagenta>'
     '<ansibrightmagenta><b>ce</b></ansibrightmagenta> <b>❯</b> '
 )
 
@@ -33,9 +32,9 @@ HUB_ITEMS = [
     ("📜  Read Messages",    "view recent posts of any chat"),
     ("📨  Send Message",     "reply or post to a chat"),
     ("🔍  Search",           "find chats by name or @username"),
-("📊  Account Overview",  "channels, groups, unread stats"),
+    ("📊  Account Overview", "channels, groups, unread stats"),
     ("ℹ️  Profile Info",      "inspect any channel or user"),
-    ("➕  Join / ➖ Leave",   "manage channel memberships"),
+    ("➕  Join / ➖  Leave",   "manage channel memberships"),
     ("❓  Help",             "full command reference"),
     ("🚪  Quit",             "disconnect safely"),
 ]
@@ -58,11 +57,13 @@ class CommandCompleter(Completer):
                         display_meta=f"{meta['args']}  —  {meta['desc']}",
                     )
             return
-        if parts[0] in ("/view", "/info", "/send", "/reply", "/join", "/leave", "/read"):
+        if parts[0] in TARGET_COMMANDS:
             frag = parts[-1]
+            if not frag:
+                return
             for d in self.app.cached_dialogs[:60]:
                 cand = f"@{d['username']}" if d["username"] else d["title"]
-                if cand.lower().startswith(frag.lower()) and frag:
+                if cand.lower().startswith(frag.lower()):
                     yield Completion(
                         cand + " ", start_position=-len(frag),
                         display=d["title"], display_meta=d["type"],
@@ -80,15 +81,19 @@ class App:
 
     # ── helpers ─────────────────────────────────────────────────────────────
 
-    def _resolve_target(self, token: str) -> str:
-        """Resolve #index (from the cached dialog list) to an entity handle."""
-        token = token.lstrip("#").lstrip("@")
+    def _resolve_target(self, token: str) -> str | int:
+        """Resolve #index (from the cached dialog list) to an entity handle.
+
+        Numeric ids (including marked ones like -100…) are returned as int —
+        Telethon would otherwise treat a digit string as a username and fail.
+        """
+        token = token.lstrip("#@")
         if token.isdigit() and self.cached_dialogs:
             idx = int(token) - 1
             if 0 <= idx < len(self.cached_dialogs):
                 d = self.cached_dialogs[idx]
-                return f"@{d['username']}" if d["username"] else str(d["id"])
-        return token if token.lstrip("-").isdigit() else f"@{token}"
+                return f"@{d['username']}" if d["username"] else d["id"]
+        return int(token) if token.lstrip("-").isdigit() else f"@{token}"
 
     async def _ensure_dialogs(self, limit: int = 50) -> list[dict]:
         if not self.cached_dialogs:
@@ -96,7 +101,7 @@ class App:
                 self.cached_dialogs = await self.service.get_dialogs(limit=limit)
         return self.cached_dialogs
 
-    async def _ask_target(self, action: str) -> str | None:
+    async def _ask_target(self, action: str) -> str | int | None:
         """Pick a chat via the interactive menu (falls back to typing)."""
         dialogs = await self._ensure_dialogs()
         menu = InteractiveMenu(
@@ -108,7 +113,7 @@ class App:
         if idx is None:
             return None
         d = dialogs[:30][idx]
-        return f"@{d['username']}" if d["username"] else str(d["id"])
+        return f"@{d['username']}" if d["username"] else d["id"]
 
     # ── actions ─────────────────────────────────────────────────────────────
 
@@ -121,9 +126,9 @@ class App:
                 return
         render_dialogs(self.cached_dialogs)
 
-    async def view_messages(self, target: str, limit: int = 15) -> None:
-        target = self._resolve_target(target)
-        with busy(f"Fetching messages from {escape(target)}…"):
+    async def view_messages(self, target: str | int, limit: int = 15) -> None:
+        target = self._resolve_target(str(target))
+        with busy(f"Fetching messages from {escape(str(target))}…"):
             try:
                 messages = await self.service.get_messages(target, limit=limit)
             except Exception as e:
@@ -131,9 +136,9 @@ class App:
                 return
         render_messages(target, messages)
 
-    async def entity_info(self, target: str) -> None:
-        target = self._resolve_target(target)
-        with busy(f"Fetching info for {escape(target)}…"):
+    async def entity_info(self, target: str | int) -> None:
+        target = self._resolve_target(str(target))
+        with busy(f"Fetching info for {escape(str(target))}…"):
             try:
                 info = await self.service.entity_info(target)
             except Exception as e:
@@ -141,15 +146,15 @@ class App:
                 return
         render_entity_info(info)
 
-    async def send_message(self, target: str, text: str) -> None:
-        target = self._resolve_target(target)
-        with busy(f"Sending to {escape(target)}…"):
+    async def send_message(self, target: str | int, text: str) -> None:
+        target = self._resolve_target(str(target))
+        with busy(f"Sending to {escape(str(target))}…"):
             try:
                 await self.service.send_message(target, text)
             except Exception as e:
                 error(f"Failed to send: {e}")
                 return
-        ok(f"Message sent to [bold]{escape(target)}[/bold]")
+        ok(f"Message sent to [bold]{escape(str(target))}[/bold]")
 
     async def join(self, target: str) -> None:
         with busy(f"Joining {escape(target)}…"):
@@ -171,11 +176,11 @@ class App:
         self.cached_dialogs = []
         warn(f"Left [bold]{escape(target)}[/bold]")
 
-    async def mark_read(self, target: str) -> None:
-        target = self._resolve_target(target)
+    async def mark_read(self, target: str | int) -> None:
+        target = self._resolve_target(str(target))
         try:
             await self.service.mark_read(target)
-            ok(f"Marked [bold]{escape(target)}[/bold] as read")
+            ok(f"Marked [bold]{escape(str(target))}[/bold] as read")
         except Exception as e:
             error(f"Failed: {e}")
 
@@ -205,7 +210,7 @@ class App:
 
     def render_help(self) -> None:
         table = Table(
-            title="✈️  Telegram CE — Command Guide",
+            title="🔵  Telegram CE — Command Guide",
             box=BOX,
             border_style=ACCENT,
             header_style=f"bold {ACCENT_2}",
@@ -310,7 +315,7 @@ class App:
                         PROMPT, completer=CommandCompleter(self)
                     )
             except (KeyboardInterrupt, EOFError):
-                console.print(f"\n[{ACCENT_2}]Goodbye! 👋[{ACCENT_2}]")
+                console.print(f"\n[{ACCENT_2}]Goodbye! 👋[/{ACCENT_2}]")
                 break
 
             command = user_input.strip()
@@ -321,7 +326,7 @@ class App:
                 if await self.dispatch(command):
                     break
             except SystemExit:
-                console.print(f"\n[{ACCENT_2}]Goodbye! 👋[{ACCENT_2}]")
+                console.print(f"\n[{ACCENT_2}]Goodbye! 👋[/{ACCENT_2}]")
                 break
             except Exception as e:
                 error(f"Unexpected error: {e}")
@@ -341,14 +346,14 @@ class App:
         elif cmd == "/clear":
             console.clear()
             render_banner(self.me)
-        elif cmd in ("/chats",):
+        elif cmd == "/chats":
             await self.show_dialogs()
         elif cmd == "/view":
             if not args:
                 warn("Usage: /view <@username | #index | id> [count]")
             else:
                 parts = args.split()
-                limit = int(parts[1]) if len(parts) > 1 and parts[1].isdigit() else 15
+                limit = max(1, int(parts[1])) if len(parts) > 1 and parts[1].isdigit() else 15
                 await self.view_messages(parts[0], limit)
         elif cmd == "/info":
             if args:
